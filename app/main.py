@@ -7,7 +7,7 @@ import logging
 # Load environment variables early (before importing modules that read env vars)
 load_dotenv()
 
-from app.routes import chat
+from app.routes import chat, sentiment
 from app.models import HealthResponse
 from app.services.llm_service import LLMService
 
@@ -37,6 +37,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(chat.router)
+app.include_router(sentiment.router)
 
 # Health check endpoint
 @app.get("/", response_model=HealthResponse)

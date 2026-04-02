@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>LLM Chat Demo</title>
+  <title>LLM Chat + Sentiment Demo</title>
   <style>
     :root { font-family: Arial, sans-serif; }
     body { max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
@@ -37,13 +37,14 @@
       margin-top: 1rem;
       background: #fafafa;
     }
+    .section-title { margin: 1.25rem 0 0.5rem 0; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
     .error { color: #b00020; }
   </style>
 </head>
 <body>
-  <h1>LLM Chat Demo</h1>
-  <p class="hint">Simple UI to test your FastAPI backend with OpenAI or Anthropic.</p>
+  <h1>LLM Chat + Sentiment Demo</h1>
+  <p class="hint">Use this UI for chat, or run Azure sentiment analysis on text/document content.</p>
 
   <div class="row">
     <div class="field">
@@ -59,6 +60,7 @@
     </div>
   </div>
 
+  <h3 class="section-title">Chat (OpenAI/Anthropic)</h3>
   <label for="prompt">Ask something</label>
   <textarea id="prompt" placeholder="Type your message here...">Explain AI in simple words.</textarea>
 
@@ -67,8 +69,27 @@
     <button id="checkProvidersBtn" type="button">Check Available Providers</button>
   </div>
 
+  <h3 class="section-title">Sentiment Analysis (Azure Language)</h3>
+  <label for="sentimentText">Text to analyze (optional if uploading file)</label>
+  <textarea id="sentimentText" placeholder="Type text for sentiment analysis..."></textarea>
+
+  <div class="row">
+    <div class="field">
+      <label for="language">Language</label>
+      <input id="language" value="en" />
+    </div>
+    <div class="field">
+      <label for="docFile">Upload Document (.pdf, .docx, .txt)</label>
+      <input id="docFile" type="file" accept=".pdf,.docx,.txt,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+    </div>
+  </div>
+
+  <div class="row">
+    <button id="analyzeSentimentBtn" type="button">Analyze Sentiment</button>
+  </div>
+
   <div class="card">
-    <h3>Response</h3>
+    <h3>Response / Sentiment Result</h3>
     <div id="response" class="mono">(waiting for request)</div>
   </div>
 
@@ -88,6 +109,10 @@
     const promptEl = document.getElementById('prompt');
     const sendBtn = document.getElementById('sendBtn');
     const checkProvidersBtn = document.getElementById('checkProvidersBtn');
+    const sentimentTextEl = document.getElementById('sentimentText');
+    const languageEl = document.getElementById('language');
+    const docFileEl = document.getElementById('docFile');
+    const analyzeSentimentBtn = document.getElementById('analyzeSentimentBtn');
     const responseEl = document.getElementById('response');
     const performanceEl = document.getElementById('performance');
     const statusEl = document.getElementById('status');
@@ -133,6 +158,81 @@
       }
     }
 
+    async function getTextFromInputOrFile() {
+      const directText = sentimentTextEl.value.trim();
+      if (directText) return directText;
+
+      const file = docFileEl.files && docFileEl.files[0];
+      if (!file) return '';
+
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || '').trim());
+        reader.onerror = () => reject(new Error('Failed to read uploaded file.'));
+        reader.readAsText(file);
+      });
+    }
+
+    async function analyzeSentimentFromDocument(file, language, baseUrl) {
+      const form = new FormData();
+      form.append('file', file);
+      form.append('language', language);
+
+      const res = await fetch(`${baseUrl}/api/v1/sentiment/document`, {
+        method: 'POST',
+        body: form
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || JSON.stringify(data));
+      }
+      return data;
+    }
+
+    async function analyzeSentiment() {
+      const baseUrl = baseUrlEl.value.trim().replace(/\/$/, '');
+      const language = (languageEl.value || 'en').trim();
+
+      analyzeSentimentBtn.disabled = true;
+      setStatus('Preparing sentiment input...');
+      responseEl.textContent = '(loading...)';
+      performanceEl.textContent = '(not applicable for sentiment endpoint)';
+
+      try {
+        const text = sentimentTextEl.value.trim();
+        const file = docFileEl.files && docFileEl.files[0];
+
+        if (!text && !file) {
+          throw new Error('Provide text or upload a text document first.');
+        }
+
+        let data;
+        if (text) {
+          const res = await fetch(`${baseUrl}/api/v1/sentiment/text`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text, language })
+          });
+
+          data = await res.json();
+          if (!res.ok) {
+            throw new Error(data.detail || JSON.stringify(data));
+          }
+        } else {
+          data = await analyzeSentimentFromDocument(file, language, baseUrl);
+        }
+
+        responseEl.textContent = JSON.stringify(data, null, 2);
+        setStatus('Sentiment analysis success ✅');
+      } catch (err) {
+        responseEl.textContent = '(sentiment request failed)';
+        setStatus(`Error: ${err.message}`, true);
+      } finally {
+        analyzeSentimentBtn.disabled = false;
+      }
+    }
+
     async function checkProviders() {
       const baseUrl = baseUrlEl.value.trim().replace(/\/$/, '');
       setStatus('Checking providers...');
@@ -167,6 +267,7 @@
 
     sendBtn.addEventListener('click', sendChat);
     checkProvidersBtn.addEventListener('click', checkProviders);
+    analyzeSentimentBtn.addEventListener('click', analyzeSentiment);
 
     // Initial provider check on load
     checkProviders();

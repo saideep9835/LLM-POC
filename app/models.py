@@ -44,3 +44,21 @@ class HealthResponse(BaseModel):
     status: str
     version: str
     providers_available: List[str]
+
+
+class SentimentRequest(BaseModel):
+    text: str = Field(..., min_length=1, description="Input text for sentiment analysis")
+    language: str = Field(default="en", min_length=2, max_length=10)
+    include_opinion_mining: bool = False
+
+
+class SentenceSentiment(BaseModel):
+    text: str
+    sentiment: Literal["positive", "neutral", "negative", "mixed"]
+    confidence_scores: dict
+
+
+class SentimentResponse(BaseModel):
+    sentiment: Literal["positive", "neutral", "negative", "mixed"]
+    confidence_scores: dict
+    sentences: List[SentenceSentiment] = []
