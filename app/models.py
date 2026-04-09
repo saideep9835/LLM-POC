@@ -62,3 +62,10 @@ class SentimentResponse(BaseModel):
     sentiment: Literal["positive", "neutral", "negative", "mixed"]
     confidence_scores: dict
     sentences: List[SentenceSentiment] = []
+
+
+class AudioSentimentResponse(BaseModel):
+    transcript: str
+    sentiment: Literal["positive", "neutral", "negative", "mixed"]
+    confidence_scores: dict
+    sentences: List[SentenceSentiment] = []

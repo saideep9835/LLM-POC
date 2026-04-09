@@ -35,7 +35,7 @@ class AzureLanguageService:
 
         if result.is_error:
             raise ValueError(f"Azure Language API error: {result.error.message}")
-
+        
         return {
             "sentiment": result.sentiment,
             "confidence_scores": {

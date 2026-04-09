@@ -88,6 +88,22 @@
     <button id="analyzeSentimentBtn" type="button">Analyze Sentiment</button>
   </div>
 
+  <h3 class="section-title">Audio Sentiment (Speech ➜ Sentiment)</h3>
+  <div class="row">
+    <div class="field">
+      <label for="audioFile">Upload Audio (.wav, .mp3, .mp4, .m4a, .ogg)</label>
+      <input id="audioFile" type="file" accept=".wav,.mp3,.mp4,.m4a,.ogg,audio/*,video/mp4" />
+    </div>
+    <div class="field">
+      <label for="speechLanguage">Speech Language</label>
+      <input id="speechLanguage" value="en-US" />
+    </div>
+  </div>
+
+  <div class="row">
+    <button id="analyzeAudioBtn" type="button">Analyze Audio</button>
+  </div>
+
   <div class="card">
     <h3>Response / Sentiment Result</h3>
     <div id="response" class="mono">(waiting for request)</div>
@@ -113,6 +129,9 @@
     const languageEl = document.getElementById('language');
     const docFileEl = document.getElementById('docFile');
     const analyzeSentimentBtn = document.getElementById('analyzeSentimentBtn');
+    const audioFileEl = document.getElementById('audioFile');
+    const speechLanguageEl = document.getElementById('speechLanguage');
+    const analyzeAudioBtn = document.getElementById('analyzeAudioBtn');
     const responseEl = document.getElementById('response');
     const performanceEl = document.getElementById('performance');
     const statusEl = document.getElementById('status');
@@ -148,7 +167,7 @@
 
         responseEl.textContent = data.response || '(empty response)';
         performanceEl.textContent = JSON.stringify(data.performance, null, 2);
-        setStatus('Success ✅');
+        setStatus('Success');
       } catch (err) {
         responseEl.textContent = '(request failed)';
         performanceEl.textContent = '(no performance data)';
@@ -190,6 +209,48 @@
       return data;
     }
 
+    async function analyzeAudio() {
+      const baseUrl = baseUrlEl.value.trim().replace(/\/$/, '');
+      const sentimentLanguage = (languageEl.value || 'en').trim();
+      const speechLanguage = (speechLanguageEl.value || 'en-US').trim();
+      const file = audioFileEl.files && audioFileEl.files[0];
+
+      if (!file) {
+        setStatus('Please upload an audio file first.', true);
+        return;
+      }
+
+      analyzeAudioBtn.disabled = true;
+      setStatus('Uploading audio and analyzing...');
+      responseEl.textContent = '(loading...)';
+      performanceEl.textContent = '(not applicable for sentiment endpoint)';
+
+      try {
+        const form = new FormData();
+        form.append('file', file);
+        form.append('speech_language', speechLanguage);
+        form.append('sentiment_language', sentimentLanguage);
+
+        const res = await fetch(`${baseUrl}/api/v1/sentiment/audio`, {
+          method: 'POST',
+          body: form,
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.detail || JSON.stringify(data));
+        }
+
+        responseEl.textContent = JSON.stringify(data, null, 2);
+        setStatus('Audio sentiment analysis success');
+      } catch (err) {
+        responseEl.textContent = '(audio sentiment request failed)';
+        setStatus(`Error: ${err.message}`, true);
+      } finally {
+        analyzeAudioBtn.disabled = false;
+      }
+    }
+
     async function analyzeSentiment() {
       const baseUrl = baseUrlEl.value.trim().replace(/\/$/, '');
       const language = (languageEl.value || 'en').trim();
@@ -224,7 +285,7 @@
         }
 
         responseEl.textContent = JSON.stringify(data, null, 2);
-        setStatus('Sentiment analysis success ✅');
+        setStatus('Sentiment analysis success');
       } catch (err) {
         responseEl.textContent = '(sentiment request failed)';
         setStatus(`Error: ${err.message}`, true);
@@ -268,6 +329,7 @@
     sendBtn.addEventListener('click', sendChat);
     checkProvidersBtn.addEventListener('click', checkProviders);
     analyzeSentimentBtn.addEventListener('click', analyzeSentiment);
+    analyzeAudioBtn.addEventListener('click', analyzeAudio);
 
     // Initial provider check on load
     checkProviders();
