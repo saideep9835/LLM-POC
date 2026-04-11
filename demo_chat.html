@@ -104,6 +104,23 @@
     <button id="analyzeAudioBtn" type="button">Analyze Audio</button>
   </div>
 
+  <h3 class="section-title">Video Sentiment (Video Indexer ➜ Sentiment)</h3>
+  <div class="row">
+    <div class="field">
+      <label for="videoFile">Upload Video (.mp4, .mov, .avi, .wmv)</label>
+      <input id="videoFile" type="file" accept=".mp4,.mov,.avi,.wmv,video/*" />
+    </div>
+    <div class="field">
+      <label for="videoSentimentLanguage">Sentiment Language</label>
+      <input id="videoSentimentLanguage" value="en" />
+    </div>
+  </div>
+
+  <div class="row">
+    <button id="analyzeVideoBtn" type="button">Analyze Video</button>
+    <button id="processQueueBtn" type="button">Process Queue (Supabase)</button>
+  </div>
+
   <div class="card">
     <h3>Response / Sentiment Result</h3>
     <div id="response" class="mono">(waiting for request)</div>
@@ -132,6 +149,9 @@
     const audioFileEl = document.getElementById('audioFile');
     const speechLanguageEl = document.getElementById('speechLanguage');
     const analyzeAudioBtn = document.getElementById('analyzeAudioBtn');
+    const videoFileEl = document.getElementById('videoFile');
+    const videoSentimentLanguageEl = document.getElementById('videoSentimentLanguage');
+    const analyzeVideoBtn = document.getElementById('analyzeVideoBtn');
     const responseEl = document.getElementById('response');
     const performanceEl = document.getElementById('performance');
     const statusEl = document.getElementById('status');
@@ -326,10 +346,177 @@
       }
     }
 
+    async function analyzeVideo() {
+      const baseUrl = baseUrlEl.value.trim().replace(/\/$/, '');
+      const sentimentLanguage = (videoSentimentLanguageEl.value || 'en').trim();
+      const file = videoFileEl.files && videoFileEl.files[0];
+
+      if (!file) {
+        setStatus('Please upload a video file first.', true);
+        return;
+      }
+
+      analyzeVideoBtn.disabled = true;
+      setStatus('Uploading video and analyzing... this may take a few minutes.');
+      responseEl.textContent = '(loading...)';
+      performanceEl.textContent = '(not applicable for sentiment endpoint)';
+
+      try {
+        const form = new FormData();
+        form.append('file', file);
+        form.append('sentiment_language', sentimentLanguage);
+
+        const res = await fetch(`${baseUrl}/api/v1/sentiment/video`, {
+          method: 'POST',
+          body: form,
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.detail || JSON.stringify(data));
+        }
+
+        // GPT sentiment
+        const gptSection = data.gpt_sentiment
+          ? [
+              `--- GPT SENTIMENT ANALYSIS ---`,
+              `Sentiment: ${data.gpt_sentiment.sentiment.toUpperCase()}  |  Confidence: ${(data.gpt_sentiment.confidence * 100).toFixed(1)}%`,
+              `Reason: ${data.gpt_sentiment.reason}`,
+              `Key Phrases: ${(data.gpt_sentiment.key_phrases || []).join(', ')}`,
+            ]
+          : [`--- GPT SENTIMENT ANALYSIS ---`, `  (not available)`];
+
+        // Video sentiments with average score
+        const videoSentimentLines = (data.video_sentiments || []).length > 0
+          ? (data.video_sentiments || [])
+              .sort((a, b) => b.average_score - a.average_score)
+              .map(s => {
+                const ranges = (s.appearances || []).map(a => `${a.start_time} → ${a.end_time}`).join(', ');
+                return `  ${s.sentiment_type}: score=${s.average_score.toFixed(2)}  (${ranges})`;
+              })
+          : ['  (no video sentiments detected)'];
+
+        // Emotions with confidence
+        const emotionLines = (data.emotions || []).length > 0
+          ? (data.emotions || [])
+              .sort((a, b) => b.confidence - a.confidence)
+              .map(e => {
+                const ranges = (e.appearances || []).map(a => `${a.start_time} → ${a.end_time}`).join(', ');
+                return `  ${e.emotion_type}: ${(e.confidence * 100).toFixed(1)}% confidence  (${ranges})`;
+              })
+          : ['  (no facial emotions detected)'];
+
+        // Insights
+        const ins = data.insights || {};
+        const insightsLines = [
+          `Topics: ${(ins.topics || []).join(', ') || '(none)'}`,
+          `Keywords: ${(ins.keywords || []).join(', ') || '(none)'}`,
+          `Duration: ${ins.duration_seconds || 0}s`,
+        ];
+        const speakerLines = (ins.speakers || []).length > 0
+          ? (ins.speakers || []).map(sp =>
+              `  ${sp.name}: ${sp.word_count} words, ${(sp.talk_ratio * 100).toFixed(1)}% talk time`
+            )
+          : ['  (no speaker data)'];
+
+        // Pitch scores (C section) — shown first and prominently
+        const ps = data.pitch_scores;
+        const dims = ['team_strength', 'technical_strength', 'innovation', 'credibility', 'confidence'];
+        const dimLabels = {
+          team_strength: 'Team Strength     ',
+          technical_strength: 'Technical Strength',
+          innovation: 'Innovation        ',
+          credibility: 'Credibility       ',
+          confidence: 'Confidence        ',
+        };
+
+        const rawJson = JSON.stringify(data.raw_index_data || {}, null, 2);
+
+        const summary = [
+          `=== RAW VIDEO INDEXER OUTPUT ===`,
+          rawJson,
+          ``,
+          `=== PITCH SCORES ===`,
+          `Video: ${data.video_id}  |  Response Time: ${data.response_time_seconds}s`,
+          ...(ps ? [
+            ``,
+            ...dims.map(d => {
+              const dim = ps[d];
+              return `${dimLabels[d]}  ${dim.score.toFixed(1)} / 10  [${dim.evidence_strength}]`;
+            }),
+            ``,
+            ...dims.flatMap(d => {
+              const dim = ps[d];
+              return [
+                `  ${dimLabels[d].trim()} reasoning:`,
+                ...dim.reasoning.map(r => `    - ${r}`),
+              ];
+            }),
+          ] : [`  (not available)`]),
+        ].join('\n');
+
+        responseEl.textContent = summary;
+        performanceEl.textContent = `Total response time: ${data.response_time_seconds}s`;
+        setStatus('Video sentiment analysis success');
+      } catch (err) {
+        responseEl.textContent = '(video sentiment request failed)';
+        setStatus(`Error: ${err.message}`, true);
+      } finally {
+        analyzeVideoBtn.disabled = false;
+      }
+    }
+
+    const processQueueBtn = document.getElementById('processQueueBtn');
+
+    async function processQueue() {
+      const baseUrl = baseUrlEl.value.trim().replace(/\/$/, '');
+      processQueueBtn.disabled = true;
+      setStatus('Processing queue... this may take several minutes.');
+      responseEl.textContent = '(loading...)';
+
+      try {
+        const res = await fetch(`${baseUrl}/api/v1/sentiment/process-queue`, { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || JSON.stringify(data));
+
+        if (data.processed === 0) {
+          responseEl.textContent = 'No unprocessed videos found in queue.';
+          setStatus('Queue empty');
+          return;
+        }
+
+        const lines = [`Processed: ${data.processed} video(s)`, ``];
+        for (const r of data.results) {
+          lines.push(`ID: ${r.id}  →  ${r.status}`);
+          if (r.status === 'ok') {
+            const s = r.scores;
+            lines.push(`  Team Strength:       ${s.team_strength} / 10`);
+            lines.push(`  Technical Strength:  ${s.technical_strength} / 10`);
+            lines.push(`  Innovation:          ${s.innovation} / 10`);
+            lines.push(`  Credibility:         ${s.credibility} / 10`);
+            lines.push(`  Confidence:          ${s.confidence} / 10`);
+          } else {
+            lines.push(`  Error: ${r.detail}`);
+          }
+          lines.push(``);
+        }
+
+        responseEl.textContent = lines.join('\n');
+        setStatus('Queue processing complete');
+      } catch (err) {
+        responseEl.textContent = '(queue processing failed)';
+        setStatus(`Error: ${err.message}`, true);
+      } finally {
+        processQueueBtn.disabled = false;
+      }
+    }
+
     sendBtn.addEventListener('click', sendChat);
     checkProvidersBtn.addEventListener('click', checkProviders);
     analyzeSentimentBtn.addEventListener('click', analyzeSentiment);
     analyzeAudioBtn.addEventListener('click', analyzeAudio);
+    analyzeVideoBtn.addEventListener('click', analyzeVideo);
+    processQueueBtn.addEventListener('click', processQueue);
 
     // Initial provider check on load
     checkProviders();

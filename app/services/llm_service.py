@@ -3,6 +3,7 @@ import openai
 from typing import List, Optional, Literal
 import os
 import time
+import json
 from app.models import Message, PerformanceMetrics
 
 class LLMService:
@@ -38,6 +39,82 @@ class LLMService:
             providers.append("anthropic")
         return providers
     
+    def analyze_sentiment_with_gpt(self, transcript: str, video_data: dict = None) -> dict:
+        """Use GPT to analyze sentiment using transcript + Video Indexer signals."""
+        if not self.openai_client:
+            raise ValueError("OpenAI API key not configured")
+
+        # Build context from Video Indexer data if available
+        vi_context = ""
+        if video_data:
+            sentiments = video_data.get("video_sentiments", [])
+            emotions = video_data.get("emotions", [])
+            insights = video_data.get("insights", {})
+
+            if sentiments:
+                sent_lines = ", ".join(
+                    f"{s['sentiment_type']} (score={s['average_score']:.2f})"
+                    for s in sentiments
+                )
+                vi_context += f"\nVideo Indexer Sentiments: {sent_lines}"
+
+            if emotions:
+                emo_lines = ", ".join(
+                    f"{e['emotion_type']} (confidence={e['confidence']:.2f})"
+                    for e in emotions
+                )
+                vi_context += f"\nFacial Emotions Detected: {emo_lines}"
+
+            if insights.get("keywords"):
+                vi_context += f"\nTop Keywords: {', '.join(insights['keywords'][:10])}"
+
+            if insights.get("topics"):
+                vi_context += f"\nTopics: {', '.join(insights['topics'])}"
+
+            if insights.get("speakers"):
+                spk_lines = ", ".join(
+                    f"{s['name']} ({s['word_count']} words, {s['talk_ratio']*100:.1f}% talk time)"
+                    for s in insights["speakers"]
+                )
+                vi_context += f"\nSpeakers: {spk_lines}"
+
+        prompt = f"""You are analyzing a video. Use ALL available signals below — transcript, facial emotions, video sentiment scores, keywords, and speaker data — to determine the overall sentiment accurately.
+
+Transcript:
+\"\"\"{transcript}\"\"\"
+{vi_context}
+
+Important: words like "struggling", "problem", "hate" may describe challenges that were SOLVED — read the full context before judging.
+
+Respond with a JSON object only, no extra text:
+{{
+  "sentiment": "<positive|neutral|negative|mixed>",
+  "confidence": <0.0 to 1.0>,
+  "reason": "<1-2 sentence explanation referencing the signals above>",
+  "key_phrases": ["<phrase1>", "<phrase2>", "<phrase3>"]
+}}"""
+
+        response = self.openai_client.chat.completions.create(
+            model=self.openai_model,
+            messages=[
+                {"role": "system", "content": "You are a sentiment analysis expert. Always respond with valid JSON only."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=300,
+            temperature=0.1,
+        )
+
+        raw = response.choices[0].message.content.strip()
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            # fallback if GPT wraps in markdown
+            import re
+            match = re.search(r'\{.*\}', raw, re.DOTALL)
+            if match:
+                return json.loads(match.group())
+            raise ValueError(f"GPT returned invalid JSON: {raw}")
+
     async def chat_completion(
         self,
         messages: List[Message],
